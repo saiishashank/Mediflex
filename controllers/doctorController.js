@@ -1,20 +1,23 @@
 const jwt = require("jsonwebtoken");
-const factory = require("./handleFactory");
 const Doctor = require("../models/doctorModel");
 const { promisify } = require("util");
 const bcrypt = require("bcryptjs");
 const { AppError } = require("../utils/appError");
 const { catchAsync } = require("../utils/catchAsync");
-const { findByIdAndUpdate } = require("../models/doctorModel");
 const User = require("../models/userModel");
-const signToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_S, {
+
+const signToken = (id, type) => {
+  return jwt.sign({ id, type }, process.env.JWT_S, {
     expiresIn: process.env.JWT_E,
   });
 };
 
-const createSendToken = (user, statusCode, res) => {
-  const token = signToken(user._id);
+/**
+ * Signs the token and sends it in the response.
+ */
+const createSendToken = (user, statusCode, res, type) => {
+  const token = signToken(user._id, type);
+
   const cookieOptions = {
     expires: new Date(
       Date.now() + process.env.JWT_COOKIE_EXPIRES_IN * 24 * 60 * 60 * 1000
@@ -22,27 +25,31 @@ const createSendToken = (user, statusCode, res) => {
     httpOnly: true,
   };
 
+  if (process.env.NODE_ENV === 'production') {
+    cookieOptions.secure = true;
+  }
   
-
   res.cookie("jwt", token, cookieOptions);
 
-  user.password = undefined; // Remove password from output
-
-  res.status(statusCode).json({
-    status: "success",
-    token,
-    data: {
-      user,
-    },
-  });
+  user.password = undefined;
+  
+  res.status(statusCode).json({ status: "success", token, data: { user } });
 };
+
+
+// --- AUTHENTICATION ---
 
 exports.signup = async (req, res) => {
   try {
-    const newUser = await Doctor.create(req.body);
-    createSendToken(newUser, 201, res); // Use createSendToken to send the response
+    const newDoctor = await Doctor.create({
+      name: req.body.name,
+      email: req.body.email,
+      password: req.body.password,
+      hospitalname: req.body.hospitalname,
+      contactnumber: req.body.contactnumber,
+    });
+    createSendToken(newDoctor, 201, res, 'doctor');
   } catch (err) {
-    console.log(err);
     res.status(400).json({
       status: "fail",
       message: err.message,
@@ -52,97 +59,69 @@ exports.signup = async (req, res) => {
 
 exports.login = catchAsync(async (req, res, next) => {
   const { email, password } = req.body;
-  console.log(req.body);
+  if (!email || !password) {
+    return next(new AppError("Please provide email and password", 400));
+  }
 
-  const user = await Doctor.findOne({ email }).select("+password");
-  if (!user || !(await bcrypt.compare(password, user.password))) {
+  const doctor = await Doctor.findOne({ email }).select("+password");
+
+  if (!doctor || !(await bcrypt.compare(password, doctor.password))) {
     return next(new AppError("Incorrect email or password", 401));
   }
-  createSendToken(user, 200, res);
+
+  createSendToken(doctor, 200, res, 'doctor');
 });
+
+
+// Get All Doctors
 exports.getAllDoctors = async (req, res) => {
   try {
-    const allUser = await Doctor.find({});
+    const allDoctors = await Doctor.find({});
     res.status(200).send({
       status: "success",
-      allUser,
+      allUser: allDoctors, // Frontend expects `allUser`
     });
   } catch (err) {
-    console.log(err);
     res.status(400).json({
       status: "fail",
       message: err.message,
     });
   }
 };
-exports.getMe = (req, res, next) => {
-  req.params.id = req.user.id;
-  next();
-};
-exports.getUser = factory.getOne(Doctor);
 
-exports.protect = catchAsync(async (req, res, next) => {
-  let token;
-  if (
-    req.headers.authorization &&
-    req.headers.authorization.startsWith("Bearer")
-  ) {
-    token = req.headers.authorization.split(" ")[1];
-  } else if (req.cookies.jwt) {
-    token = req.cookies.jwt;
-  }
-  console.log(token);
-  if (!token) {
-    return next(new AppError("you are not logged in! please login", 401));
-  }
-  const decoded = await promisify(jwt.verify)(token, process.env.JWT_S);
-  let query = Doctor.findById(decoded.id);
-  const currentUser = await query;
-  if (!currentUser) {
-    return next(
-      new Error("The user belonging to this token no longer exist", 401)
-    );
-  }
-  req.user = currentUser;
-  res.locals.user = currentUser;
-  next();
-});
+
+// Update Doctor with Appointment
 exports.update = catchAsync(async (req, res, next) => {
-  const id = req.params.id;
-  const currentUser = req.body.user;
-  const date = req.body.date;
-  console.log(req.user);
-  console.log(req.params.id);
-  const patient = await User.findById(req.user);
-  console.log(patient);
-  //   if (!user12) {
-  //     return res.status(404).json({
-  //       status: "fail",
-  //       message: "User not found.",
-  //     });
-  //   }
-  const doc = await Doctor.findByIdAndUpdate(
-    req.params.id,
-    {
-      $push: {
-        appointments: { patient: patient, date: date },
-      },
-    },
-    {
-      new: true,
-      runValidators: true,
-    }
+  const doctorId = req.params.id;
+  const patientId = req.user._id;
+  const { date } = req.body;
+  const updatedDoctor = await Doctor.findByIdAndUpdate(
+    doctorId,
+    { $push: { appointments: { patient: patientId, date: date } } },
+    { new: true, runValidators: true }
   );
-  //   if (!doc) {
-  //     return res.status(404).json({
-  //       status: "fail",
-  //       message: "Doctor not found.",
-  //     });
-  //   }
+  if (!updatedDoctor) {
+    return next(new AppError("Doctor not found.", 404));
+  }
   res.status(200).json({
     status: "success",
+    data: { doctor: updatedDoctor },
+  });
+});
+
+// Get Current Doctor's Details (for /me route)
+exports.getMe = catchAsync(async (req, res, next) => {
+  const doctor = await Doctor.findById(req.user.id).populate({
+    path: 'appointments.patient',
+    select: 'name email'
+  });
+  if (!doctor) {
+    return next(new AppError('Doctor not found.', 404));
+  }
+  res.status(200).json({
+    status: 'success',
     data: {
-      doctor: doc,
-    },
+      data: doctor 
+    }
   });
 });

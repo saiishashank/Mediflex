@@ -1,5 +1,6 @@
 const express = require("express");
 const authController = require("../controllers/authController");
+
 const Router = express.Router();
 Router.post("/signup", authController.signup);
 Router.post("/login", authController.login);
@@ -11,12 +12,12 @@ Router.get("/images", authController.protect, authController.getUserImages);
 
 
 // Router.patch("/update/:id", authController.protect,doctorController.update);
-// Router.get(
-//   "/me",
-//   authController.protect,
-//   authController.getMe,
-//   authController.getUser
-// );
+ Router.get(
+  "/me",
+   authController.protect,
+   authController.getMe,
+   authController.getUser
+);
 // Router.get("/", doctorController.getAllDoctors);
 //   .post(doctorController.createUser);
 // Router.route("/:id")

@@ -1,22 +1,19 @@
 const express = require("express");
 const doctorController = require("../controllers/doctorController");
-const authController = require("../controllers/authController");
-const Router = express.Router();
-Router.post("/signup", doctorController.signup);
-Router.post("/login", doctorController.login);
-// Router.get("/logout", authController.logOut);
+// Import the PROTECT function from the USER controller
+const { protect } = require("../controllers/authController"); 
 
-Router.patch("/update/:id", authController.protect, doctorController.update);
-Router.get(
-  "/me",
-  doctorController.protect,
-  doctorController.getMe,
-  doctorController.getUser
-);
-Router.get("/",doctorController.getAllDoctors);
-//   .post(doctorController.createUser);
-// Router.route("/:id")
-//   .get(doctorController.getUser)
-//   .patch(doctorController.updateUser)
-//   .delete(doctorController.deleteUser);
-module.exports = Router;
+const router = express.Router();
+
+router.post("/signup", doctorController.signup);
+router.post("/login", doctorController.login);
+router.get("/", doctorController.getAllDoctors);
+
+// This route is now correctly using the single, unified protect middleware
+router.get("/me", protect, doctorController.getMe); 
+
+// The 'update' route is for a patient to book an appointment, so it should be protected too
+// It checks for a logged-in user (patient OR doctor) and then lets them update
+router.patch("/update/:id", protect, doctorController.update);
+
+module.exports = router;

@@ -24,7 +24,19 @@ const doctorSchema = new mongoose.Schema({
     required: [true, "Please provide a password"],
     
   },
-  appointments: [],
+   appointments: [
+    {
+      date: {
+        type: Date,
+        required: true,
+      },
+      patient: {
+        type: mongoose.Schema.ObjectId,
+        ref: "User", // This creates a reference to the User model
+        required: true,
+      },
+    },
+  ],
 });
 
 doctorSchema.pre("save", async function (next) {
